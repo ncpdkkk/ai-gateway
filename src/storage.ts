@@ -1,11 +1,24 @@
 import { KV_KEYS } from './config'
-import type { Env, Provider, ProxyKey, Session } from './types'
+import type { Env, Provider, ProxyKey, Session, Upstream } from './types'
 
 // ===== 提供商 CRUD =====
 
+/** Convert legacy baseUrl + apiKeys records at read time without rewriting KV. */
+export function normalizeProvider(provider: Provider): Provider {
+  if (provider.upstreams) return provider
+  const baseUrl = provider.baseUrl || ''
+  const upstreams: Upstream[] = (provider.apiKeys || []).map((entry, index) => ({
+    id: `legacy-${index}-${entry.key.slice(-8)}`,
+    baseUrl,
+    apiKey: entry.key,
+    enabled: entry.enabled,
+  }))
+  return { ...provider, upstreams }
+}
+
 export async function getProviders(env: Env): Promise<Provider[]> {
   const data = await env.KV.get(KV_KEYS.PROVIDERS)
-  return data ? JSON.parse(data) : []
+  return data ? (JSON.parse(data) as Provider[]).map(normalizeProvider) : []
 }
 
 export async function getProvider(env: Env, id: string): Promise<Provider | null> {

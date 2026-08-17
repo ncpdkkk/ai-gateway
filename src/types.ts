@@ -8,12 +8,25 @@ export interface ApiKeyEntry {
   enabled: boolean
 }
 
+/** A routable upstream. Health, credentials and model aliases belong together. */
+export interface Upstream {
+  id: string
+  baseUrl: string
+  apiKey: string
+  enabled: boolean
+  /** Gateway model ID -> provider-specific model ID. */
+  modelMap?: Record<string, string>
+}
+
 export interface Provider {
   id: string
   name: string
-  baseUrl: string
+  /** @deprecated Kept to read configurations created before upstream pools. */
+  baseUrl?: string
   apiType?: 'openai' | 'anthropic'
-  apiKeys: ApiKeyEntry[]
+  /** @deprecated Kept to read configurations created before upstream pools. */
+  apiKeys?: ApiKeyEntry[]
+  upstreams?: Upstream[]
   models: Model[]
   enabled: boolean
   createdAt: string
@@ -47,9 +60,10 @@ export interface TestModelRequest {
 export interface CreateProviderRequest {
   id: string
   name: string
-  baseUrl: string
+  baseUrl?: string
   apiType?: 'openai' | 'anthropic'
   apiKeys?: Array<{ key: string; enabled: boolean }>
+  upstreams?: Upstream[]
   models?: Array<{ id: string; enabled: boolean }> | string[]
   enabled?: boolean
 }
@@ -59,6 +73,7 @@ export interface UpdateProviderRequest {
   baseUrl?: string
   apiType?: 'openai' | 'anthropic'
   apiKeys?: Array<{ key: string; enabled: boolean }>
+  upstreams?: Upstream[]
   models?: Array<{ id: string; enabled: boolean }> | string[]
   enabled?: boolean
 }

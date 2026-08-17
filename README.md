@@ -1,12 +1,13 @@
 # AI Gateway
 
-基于 Cloudflare Workers + Hono 的 AI 提供商 API 代理网关，统一 `/v1` 接口转发，支持多 Key 轮询、健康检查与自动故障转移。
+基于 Cloudflare Workers + Hono 的 AI 提供商 API 代理网关，统一 `/v1` 接口转发，支持多上游节点轮询、模型别名映射、健康检查与自动故障转移。
 
 ## 功能与特性
 
 - **统一 API 接口** — 所有 AI 提供商通过 `https://你的域名/v1` 访问，兼容 OpenAI / Anthropic 协议
-- **多 Key 轮询 + 健康检查** — 每个提供商可配置多个 API Key，请求随机打乱；失败 Key 自动降权，连续失败 5 次后进入冷却
-- **Key 自动恢复** — 降权 Key 冷却 5 分钟后自动获得一次试用机会，成功则恢复权重，失败则重新冷却
+- **多上游轮询 + 健康检查** — 每个提供商可配置多个上游节点；每个节点独立绑定 API 地址、API Key、启用状态和健康记录，健康节点随机均衡
+- **模型别名映射** — 同一个统一模型可按节点映射到不同中转商的模型 ID，例如 `deepseek-v4-pro` 可分别转发为 `DeepSeek-V4-Pro` 或其他别名
+- **自动恢复** — 失败节点连续失败 5 次后进入冷却；5 分钟后自动获得一次试用机会，成功则恢复
 - **多提供商管理** — 内置 DeepSeek / OpenAI / Anthropic / Gemini，支持自定义添加
 - **两级启用控制** — 提供商级别 + 模型级别的启用/禁用
 - **转发 Key 认证** — 生成 `sk_cf_*` 格式的 API Key，支持有效期管理
@@ -68,6 +69,31 @@ npm run dev
   - `deepseek/deepseek-chat`
   - `openai/gpt-4o`
   - `anthropic/claude-sonnet-4-20250514`
+
+### 多上游与模型映射
+
+在管理后台的“上游节点”中填写 JSON 数组。客户端继续使用统一模型名，网关会在选中节点后改写为该节点接受的模型名：
+
+```json
+[
+  {
+    "id": "provider-a",
+    "baseUrl": "https://api-a.example.com/v1",
+    "apiKey": "sk-a",
+    "enabled": true,
+    "modelMap": { "deepseek-v4-pro": "DeepSeek-V4-Pro" }
+  },
+  {
+    "id": "provider-b",
+    "baseUrl": "https://api-b.example.com/v1",
+    "apiKey": "sk-b",
+    "enabled": true,
+    "modelMap": { "deepseek-v4-pro": "deepseek-v4-pro" }
+  }
+]
+```
+
+旧版的 `baseUrl + apiKeys` 配置会在读取时自动转换为上游节点，无需迁移现有 KV 数据。
 
 ## 项目结构
 

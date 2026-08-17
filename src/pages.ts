@@ -187,7 +187,8 @@ ${H('管理')}
       <div class="fg"><label>名称</label><input type="text" id="anm" placeholder="DeepSeek"></div>
       <div class="fg"><label>ID</label><input type="text" id="aid" placeholder="deepseek"></div>
     </div>
-    <div class="fg"><label>API 地址</label><input type="url" id="aurl" placeholder="https://api.deepseek.com"></div>
+    <div class="fg"><label>API 地址 <span class="mu">（旧配置兼容）</span></label><input type="url" id="aurl" placeholder="https://api.deepseek.com"></div>
+    <div class="fg"><label>上游节点 <span class="mu">（推荐：地址、Key 和模型别名绑定；JSON 数组）</span></label><textarea id="aupstreams" rows="6" class="fx1" placeholder='[{"id":"node-a","baseUrl":"https://api-a.example.com/v1","apiKey":"sk-xxx","enabled":true,"modelMap":{"deepseek-v4-pro":"DeepSeek-V4-Pro"}}]'></textarea></div>
     <div class="fg">
       <label>API 格式</label>
       <select id="afmt" class="select-sm">
@@ -239,8 +240,7 @@ ${H('管理')}
           <i class="fas fa-chevron-right c-l fs-65" style="transition:transform .12s;" id="ch-${p.id}"></i>
           <div><h3>${p.name}</h3>
             <div class="pu"><i class="fas fa-link"></i>
-              <span class="ov">${p.baseUrl}</span>
-              <i class="fas fa-copy cp" onclick="event.stopPropagation();copyText('${p.baseUrl}',this)"></i>
+              <span class="ov">${p.upstreams?.length || 0} 个上游节点</span>
             </div>
           </div>
         </div>
@@ -259,26 +259,12 @@ ${H('管理')}
             <label>ID</label><input type="text" value="${p.id}" disabled style="background:var(--c-bg-alt);">
           </div>
         </div>
-        <div class="fg"><label>API 地址</label><input type="url" id="url-${p.id}" value="${p.baseUrl}"></div>
+        <div class="fg"><label>上游节点 <span class="mu">（每个节点：地址、Key、启用状态、模型别名）</span></label><textarea id="ups-${p.id}" rows="8" class="fx1">${JSON.stringify(p.upstreams || [], null, 2)}</textarea></div>
         <div class="fg"><label>API 格式</label>
           <select id="at-${p.id}" class="select-sm">
             <option value="openai" ${(p.apiType||'openai')==='openai'?'selected':''}>OpenAI 兼容</option>
             <option value="anthropic" ${p.apiType==='anthropic'?'selected':''}>Anthropic 兼容</option>
           </select>
-        </div>
-        <div class="fg"><label>API Keys</label>
-          <div id="keys-${p.id}">${p.apiKeys.map((k, ki)=>`
-            <div class="fc mb-3" data-kidx="${ki}">
-              <input type="text" value="${k.key}" class="fx1" id="k-${p.id}-${ki}" placeholder="API Key">
-              <label class="tg"><input type="checkbox" ${k.enabled?'checked':''} id="ken-${p.id}-${ki}"><span class="sl"></span></label>
-              <button class="btn btn-gh btn-xs" onclick="testKeyRow('${p.id}',${ki})" title="测试"><i class="fas fa-plug"></i></button>
-              <button class="btn btn-gh btn-xs" onclick="rmKeyRow('${p.id}',${ki})"><i class="fas fa-times c-l"></i></button>
-            </div>`).join('')}
-          </div>
-          <div class="fc mt-1">
-            <input type="text" id="nk-${p.id}" placeholder="API Key" class="fx1">
-            <button class="btn btn-gh btn-xs" onclick="addKeyRow('${p.id}')"><i class="fas fa-plus"></i> 添加</button>
-          </div>
         </div>
         <div class="fg">
           <label>模型</label>
@@ -476,9 +462,20 @@ function testNewMdl(btn) {
 	  })
 	}
 
+function parseUpstreams(value) {
+  if (!value.trim()) return []
+  const upstreams = JSON.parse(value)
+  if (!Array.isArray(upstreams) || upstreams.some(u => !u.id || !u.baseUrl || !u.apiKey)) {
+    throw new Error('每个上游节点必须包含 id、baseUrl 和 apiKey')
+  }
+  return upstreams
+}
+
 async function createProv() {
   const nm = document.getElementById('anm').value.trim(), id = document.getElementById('aid').value.trim()
   const url = document.getElementById('aurl').value.trim(), apiType = document.getElementById('afmt').value
+  let upstreams
+  try { upstreams = parseUpstreams(document.getElementById('aupstreams').value) } catch (e) { toast(e.message, 'error'); return }
   const aki = document.querySelectorAll('#akeys .aki')
   const keys = Array.from(aki).map((inp, i) => {
     const k = inp.value.trim()
@@ -492,11 +489,11 @@ async function createProv() {
     return mid ? { id: mid, enabled: en } : null
   }).filter(Boolean)
   const enabled = document.getElementById('aen').checked
-  if (!nm || !id || !url) { toast('请填写名称、ID 和 API 地址', 'error'); return }
+  if (!nm || !id || (!url && upstreams.length === 0)) { toast('请填写名称、ID 和至少一个上游节点', 'error'); return }
   const r = await fetch('/admin/api/providers', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id, name: nm, baseUrl: url, apiType, apiKeys: keys, models, enabled })
+    body: JSON.stringify({ id, name: nm, baseUrl: url, apiType, apiKeys: keys, upstreams, models, enabled })
   })
   const d = await r.json()
   if (d.success) { toast('已创建', 'success'); location.reload() }
@@ -556,14 +553,15 @@ function getMdl(id) {
 }
 
 async function save(id) {
-  const nm = document.getElementById('nm-' + id).value.trim(), url = document.getElementById('url-' + id).value.trim()
+  const nm = document.getElementById('nm-' + id).value.trim()
   const apiType = document.getElementById('at-' + id).value
-  const keys = getKeys(id)
+  let upstreams
+  try { upstreams = parseUpstreams(document.getElementById('ups-' + id).value) } catch (e) { toast(e.message, 'error'); return }
   const models = getMdl(id), enabled = document.getElementById('en-' + id).checked
   const r = await fetch('/admin/api/providers/' + encodeURIComponent(id), {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: nm, baseUrl: url, apiType, apiKeys: keys, models, enabled })
+    body: JSON.stringify({ name: nm, apiType, upstreams, models, enabled })
   })
   const d = await r.json()
   if (d.success) { toast('已保存', 'success'); location.reload() }

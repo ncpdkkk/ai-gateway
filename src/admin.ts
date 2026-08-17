@@ -73,8 +73,8 @@ export async function handleGetProviders(c: Context<{ Bindings: Env }>) {
 export async function handleCreateProvider(c: Context<{ Bindings: Env }>) {
   const body = await c.req.json<CreateProviderRequest>()
 
-  if (!body.id || !body.name || !body.baseUrl) {
-    return c.json<ApiResponse>({ success: false, message: 'id、name、baseUrl 为必填项' }, 400)
+  if (!body.id || !body.name || (!body.baseUrl && !body.upstreams?.length)) {
+    return c.json<ApiResponse>({ success: false, message: 'id、name 和至少一个上游节点为必填项' }, 400)
   }
 
   const providers = await getProviders(c.env)
@@ -86,9 +86,10 @@ export async function handleCreateProvider(c: Context<{ Bindings: Env }>) {
   const provider: Provider = {
     id: body.id,
     name: body.name,
-    baseUrl: body.baseUrl.replace(/\/$/, ''),
+    baseUrl: body.baseUrl?.replace(/\/$/, '') || body.upstreams?.[0]?.baseUrl.replace(/\/$/, ''),
     apiType: body.apiType || 'openai',
-apiKeys: normalizeArray(body.apiKeys, (k) => ({ key: k, enabled: true })),
+    apiKeys: normalizeArray(body.apiKeys, (k) => ({ key: k, enabled: true })),
+    upstreams: body.upstreams?.map((upstream) => ({ ...upstream, baseUrl: upstream.baseUrl.replace(/\/$/, '') })),
     models: body.models
       ? normalizeArray(body.models, (m) => ({ id: m, enabled: true }))
       : [],
@@ -112,6 +113,9 @@ export async function handleUpdateProvider(c: Context<{ Bindings: Env }>) {
   if (body.apiType !== undefined) updates.apiType = body.apiType
 if (body.apiKeys !== undefined) {
     updates.apiKeys = normalizeArray(body.apiKeys, (k) => ({ key: k, enabled: true }))
+  }
+  if (body.upstreams !== undefined) {
+    updates.upstreams = body.upstreams.map((upstream) => ({ ...upstream, baseUrl: upstream.baseUrl.replace(/\/$/, '') }))
   }
   if (body.enabled !== undefined) updates.enabled = body.enabled
   if (body.models !== undefined) {
@@ -155,13 +159,17 @@ export async function handleTestModel(c: Context<{ Bindings: Env }>) {
     return c.json<ApiResponse>({ success: false, message: `模型 "${modelId}" 不存在于提供商 "${provider.name}"` }, 404)
   }
 
-  const enabledKeys = provider.apiKeys.filter(k => k.enabled)
-  if (enabledKeys.length === 0) {
-    return c.json<ApiResponse>({ success: false, message: '该提供商未配置可用的 API Key' }, 400)
+  const upstream = provider.upstreams?.find((item) => item.enabled)
+  if (!upstream) {
+    return c.json<ApiResponse>({ success: false, message: '该提供商未配置可用上游节点' }, 400)
   }
 
-  const apiKey = enabledKeys[0].key
-  const result = await testModelConnection(provider.baseUrl, apiKey, modelId, provider.apiType)
+  const result = await testModelConnection(
+    upstream.baseUrl,
+    upstream.apiKey,
+    upstream.modelMap?.[modelId] || modelId,
+    provider.apiType
+  )
 
   return c.json<ApiResponse>({
     success: true,
